@@ -13,7 +13,8 @@ def build_answer(hits: list[dict]) -> str:
 
     parts = ["На основании найденных фрагментов:"]
     for i, hit in enumerate(relevant, 1):
-        parts.append(f"\n[{i}] doc_id={hit['doc_id']}, score={hit['score']:.2f}")
+        parts.append(f"\n[{i}] {hit['name']}")
+        parts.append(f"doc_id={hit['doc_id']}, score={hit['score']:.2f}")
         parts.append(hit["text"])
     return "\n".join(parts)
 
