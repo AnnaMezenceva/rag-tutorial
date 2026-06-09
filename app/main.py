@@ -8,21 +8,19 @@ from app.prompts import MIN_SCORE
 from app.retriever import Retriever
 
 DEMO_QUESTIONS = [
-    "Ипотека - закрытие ипотечной сделки",
-    "Какие переменные в датасете про безработицу?",
-    "За какой период данные об инфляции?",
+    "Какой фильм про побег из тюрьмы?",
+    "Какие фильмы о космосе?",
+    "Посоветуй фильм про мафию",
+    "Какие есть фильмы про войну?",
     "Как приготовить борщ?",
 ]
-
 
 def index_exists() -> bool:
     return all(p.exists() for p in (VECTORIZER_PKL, MATRIX_NPZ, INDEX_CHUNKS_JSONL))
 
-
 @st.cache_resource
 def load_retriever() -> Retriever:
     return Retriever()
-
 
 def render_chunk(i: int, src: dict, expanded: bool = True) -> None:
     label = f"[{i}] doc_id={src['doc_id']} · score={src['score']:.4f}"
@@ -30,15 +28,14 @@ def render_chunk(i: int, src: dict, expanded: bool = True) -> None:
         st.markdown(f"**{src['name']}**")
         st.text(src["text"])
 
-
-def render_fragments(sources: list[dict]) -> None:
+def render_fragments(sources: list[dict], score_threshold: float) -> None:
     st.subheader("Найденные фрагменты (top-k)")
-    if not sources:
-        st.info("Фрагменты не найдены.")
+    filtered = [s for s in sources if s["score"] >= score_threshold]
+    if not filtered:
+        st.info("Фрагменты не найдены (или score ниже порога).")
         return
-    for i, src in enumerate(sources, 1):
+    for i, src in enumerate(filtered, 1):
         render_chunk(i, src, expanded=src["score"] >= MIN_SCORE)
-
 
 def render_sources(sources: list[dict]) -> None:
     st.subheader("Источники")
@@ -48,11 +45,10 @@ def render_sources(sources: list[dict]) -> None:
     for i, src in enumerate(sources, 1):
         render_chunk(i, src, expanded=False)
 
-
 def main() -> None:
-    st.set_page_config(page_title="RAG Tutorial", layout="wide")
-    st.title("RAG Tutorial")
-    st.caption("Учебный RAG: TF-IDF + demo-ответ с источниками")
+    st.set_page_config(page_title="RAG Tutorial — TMDB Movies", layout="wide")
+    st.title("RAG Tutorial — TMDB Movies")
+    st.caption("Учебный RAG: TF-IDF + demo-ответ с источниками (9979 фильмов)")
 
     if not index_exists():
         st.error(
@@ -61,11 +57,35 @@ def main() -> None:
         )
         st.stop()
 
+    # --- Sidebar ---
     st.sidebar.header("Demo-вопросы")
     for q in DEMO_QUESTIONS:
         if st.sidebar.button(q, use_container_width=True):
             st.session_state["question"] = q
 
+    st.sidebar.markdown("---")
+    st.sidebar.header("Настройки")
+    score_threshold = st.sidebar.slider(
+        "Порог score", min_value=0.0, max_value=1.0, value=0.0, step=0.05,
+        help="Показывать только фрагменты с score выше порога"
+    )
+    top_k = st.sidebar.slider(
+        "Top-K результатов", min_value=1, max_value=10, value=TOP_K,
+        help="Сколько фрагментов искать"
+    )
+
+    # --- История запросов ---
+    if "history" not in st.session_state:
+        st.session_state["history"] = []
+
+    if st.session_state["history"]:
+        st.sidebar.markdown("---")
+        st.sidebar.header("История запросов")
+        for past_q in st.session_state["history"][-10:]:
+            if st.sidebar.button(f"↩ {past_q}", key=f"hist_{past_q}", use_container_width=True):
+                st.session_state["question"] = past_q
+
+    # --- Основная часть ---
     question = st.text_input("Ваш вопрос", key="question")
 
     if st.button("Спросить", type="primary"):
@@ -73,16 +93,18 @@ def main() -> None:
             st.warning("Введите вопрос.")
             st.stop()
 
-        with st.spinner("Поиск..."):
-            result = ask(question.strip(), k=TOP_K, retriever=load_retriever())
+        if question.strip() not in st.session_state["history"]:
+            st.session_state["history"].append(question.strip())
 
-        render_fragments(result["sources"])
+        with st.spinner("Поиск..."):
+            result = ask(question.strip(), k=top_k, retriever=load_retriever())
+
+        render_fragments(result["sources"], score_threshold)
 
         st.subheader("Ответ")
         st.text(result["answer"])
 
         render_sources(result["sources"])
-
 
 if __name__ == "__main__":
     main()
